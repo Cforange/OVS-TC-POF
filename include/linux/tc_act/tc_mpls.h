@@ -18,6 +18,20 @@ struct tc_mpls {
        int m_action;   /* action of type TCA_MPLS_ACT_*. */
 };
 
+struct tc_add_field {
+    tc_gen;
+};
+
+enum {
+    TCA_ADD_FIELD_UNSPEC,
+    TCA_ADD_FIELD_PARMS,
+    TCA_ADD_FIELD_OFFSET,
+    TCA_ADD_FIELD_LEN,
+    TCA_ADD_FIELD_VALUE,
+    __TCA_ADD_FIELD_MAX,
+};
+#define TCA_ADD_FIELD_MAX (__TCA_ADD_FIELD_MAX - 1)
+
 enum {
        TCA_MPLS_UNSPEC,
        TCA_MPLS_TM,    /* struct tcf_t; time values associated with action. */

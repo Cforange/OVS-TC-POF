@@ -1907,7 +1907,7 @@ netdev_tc_flow_put(struct netdev *netdev, struct match *match,
                 }
                     break;
                 case OVS_KEY_ATTR_ADD_FIELD: {
-                    VLOG_INFO("+++++++++++zq: netdev_tc_flow_put: nla_action == OVS_KEY_ATTR_ADD_FIELD");
+                    VLOG_INFO("+++++++++++cf: netdev_tc_flow_put: nla_action == OVS_KEY_ATTR_ADD_FIELD");
                     const struct ovs_key_add_field *add_field_key = nl_attr_get(a);
                     /*VLOG_INFO("++++++zq netdev_flow_put: add_field_key_fieldID=:%d", add_field_key->field_id);
                     VLOG_INFO("++++++zq netdev_flow_put:  add_field_key_value[0]=:%d", add_field_key->value[0]);
@@ -1915,30 +1915,19 @@ netdev_tc_flow_put(struct netdev *netdev, struct match *match,
                     VLOG_INFO("++++++zq netdev_flow_put: add_field_key_value[2]=:%d", add_field_key->value[2]);
                     VLOG_INFO("++++++zq netdev_flow_put: add_field_key_value[3]=:%d", add_field_key->value[3]);*/
                     if (add_field_key->field_id != 0xffff) {   // 'add_static_field' action, fields come from controller
-                        uint16_t int_data_1 = (uint16_t) (add_field_key->value[1] << 8) | add_field_key->value[0];
-                        uint16_t int_data_2 = (uint16_t) (add_field_key->value[3] << 8) | add_field_key->value[2];
-                        VLOG_INFO("++++++zq netdev_flow_put: int_data_1:0x%"
-                                          PRIx16, int_data_1);
-                        VLOG_INFO("++++++zq netdev_flow_put: int_data_2:0x%"
-                                          PRIx16, int_data_2);
-                        ovs_be32 mpls_lse = (ovs_be32) (int_data_2 << 16) | int_data_1;
-
-                        action->mpls.proto = 0x4788;
-                        VLOG_INFO("++++++zq netdev_flow_put: action->mpls.proto:0x%"
-                                          PRIx16, action->mpls.proto);
-                        action->mpls.label = mpls_lse_to_label(mpls_lse);
-                        VLOG_INFO("++++++zq netdev_flow_put: action->mpls.label:0x%"
-                                          PRIx16, action->mpls.label);
-                        action->mpls.tc = mpls_lse_to_tc(mpls_lse);
-                        VLOG_INFO("++++++zq netdev_flow_put: action->mpls.tc:0x%"
-                                          PRIx16, action->mpls.tc);
-                        action->mpls.ttl = mpls_lse_to_ttl(mpls_lse);
-                        VLOG_INFO("++++++zq netdev_flow_put: action->mpls.ttl:0x%"
-                                          PRIx16, action->mpls.ttl);
-                        action->mpls.bos = mpls_lse_to_bos(mpls_lse);
-                        VLOG_INFO("++++++zq netdev_flow_put: action->mpls.bos:0x%"
-                                          PRIx16, action->mpls.bos);
-                        action->type = TC_ACT_MPLS_PUSH;
+                        // cf: get message from add_field_key and put into current action
+                        action->add_field.offset = add_field_key->offset; // host byte?
+                        VLOG_INFO("++++++cf netdev_flow_put: action->add_field.offset:0x%"
+                                            PRIx16, action->add_field.offset);
+                        action->add_field.len = add_field_key->len;
+                        VLOG_INFO("++++++cf netdev_flow_put: action->add_field.len:0x%"
+                                            PRIx16, action->add_field.len);
+                        memcpy(action->add_field.value, add_field_key->value, 16); // how to check?
+                        VLOG_INFO("++++++cf netdev_flow_put: action->add_field.value[0]:0x%"
+                                            PRIu8",value[1]:0x%"PRIu8",value[2]:0x%"PRIu8",value[3]:0x%"PRIu8
+                                            ,action->add_field.value[0],action->add_field.value[1],
+                                            action->add_field.value[2],action->add_field.value[3]);
+                        action->type = TC_ACT_ADD_FIELD;
                         flower.action_count++;
                     } else { // 'add_int_field' action, fields come from controller
                         uint32_t device_id = ntohl(add_field_key->device_id);
@@ -2035,7 +2024,8 @@ netdev_tc_flow_put(struct netdev *netdev, struct match *match,
                                               PRIx16, action->mpls.ttl);*/
                             action->mpls.bos = mpls_lse_to_bos(mpls_lse);
                             /*VLOG_INFO("++++++zq netdev_flow_put: action->mpls.bos:0x%"
-                                              PRIx16, action->mpls.bos);*/
+                                              PRIx16, actio
+                                              n->mpls.bos);*/
                             action->type = TC_ACT_MPLS_PUSH;
                             flower.action_count++;
                         }

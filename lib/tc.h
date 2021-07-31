@@ -52,7 +52,7 @@ enum tc_flower_reserved_prio {
 };
 #define TC_RESERVED_PRIORITY_MAX (__TC_RESERVED_PRIORITY_MAX -1)
 
-enum tc_qdisc_hook {
+enum  tc_qdisc_hook {
     TC_INGRESS,
     TC_EGRESS,
 };
@@ -163,6 +163,7 @@ enum tc_action_type {
     TC_ACT_MPLS_SET,
     TC_ACT_GOTO,
     TC_ACT_CT,
+    TC_ACT_ADD_FIELD,
 };
 
 enum nat_type {
@@ -246,6 +247,13 @@ struct tc_action {
             bool commit;
         } ct;
      };
+
+    //cf: add the add_field action message
+    struct {
+        ovs_be16 offset;
+        ovs_be16 len;
+        uint8_t value[16]; // pof max field length : 16 bytes
+    } add_field;
 
      enum tc_action_type type;
 };

@@ -2222,6 +2222,23 @@ nl_msg_put_act_flags(struct ofpbuf *request) {
     nl_msg_put_unspec(request, TCA_ACT_FLAGS, &act_flags, sizeof act_flags);
 }
 
+static inline void
+nl_msg_put_act_add_field(struct ofpbuf *request, ovs_be16 offset, ovs_be16 len, uint8_t value[], size_t size) {
+    size_t act_offset;
+
+    nl_msg_put_string(request, TCA_ACT_KIND, "add_field");
+    act_offset = nl_msg_start_nested(request, TCA_ACT_OPTIONS | NLA_F_NESTED); // bitwise OR, nested attributes
+    {
+        struct tc_add_field parm = { .action = TC_ACT_PIPE}; // defined in tc_mpls.h
+
+        nl_msg_put_unspec(request, TCA_ADD_FIELD_PARMS, &parm, sizeof parm);
+        nl_msg_put_be16(request, TCA_ADD_FIELD_OFFSET, offset);
+        nl_msg_put_be16(request, TCA_ADD_FIELD_LEN, len);
+        nl_msg_put_string__(request, TCA_ADD_FIELD_VALUE, value, size); // with the null terminated
+    }
+    nl_msg_end_nested(request, act_offset);
+}
+
 /* Given flower, a key_to_pedit map entry, calculates the rest,
  * where:
  *
@@ -2401,157 +2418,166 @@ nl_msg_put_flower_acts(struct ofpbuf *request, struct tc_flower *flower)
         for (i = 0; i < flower->action_count; i++, action++) {
             /*VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: flower->action->type: %d", action->type);*/
             switch (action->type) {
-            case TC_ACT_PEDIT: {
-                VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_PEDIT start");
-                act_offset = nl_msg_start_nested(request, act_index++);
-                error = nl_msg_put_flower_rewrite_pedits(request, flower);
-                if (error) {
-                    return error;
-                }
-                nl_msg_end_nested(request, act_offset);
-
-                if (flower->csum_update_flags) {
+                case TC_ACT_PEDIT: {
+                    VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_PEDIT start");
                     act_offset = nl_msg_start_nested(request, act_index++);
-                    nl_msg_put_act_csum(request, flower->csum_update_flags);
+                    error = nl_msg_put_flower_rewrite_pedits(request, flower);
+                    if (error) {
+                        return error;
+                    }
+                    nl_msg_end_nested(request, act_offset);
+
+                    if (flower->csum_update_flags) {
+                        act_offset = nl_msg_start_nested(request, act_index++);
+                        nl_msg_put_act_csum(request, flower->csum_update_flags);
+                        nl_msg_put_act_flags(request);
+                        nl_msg_end_nested(request, act_offset);
+                    }
+                    VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_PEDIT end");
+                }
+                    break;
+                case TC_ACT_ENCAP: {
+                    act_offset = nl_msg_start_nested(request, act_index++);
+                    nl_msg_put_act_tunnel_key_set(request, action->encap.id_present,
+                                                  action->encap.id,
+                                                  action->encap.ipv4.ipv4_src,
+                                                  action->encap.ipv4.ipv4_dst,
+                                                  &action->encap.ipv6.ipv6_src,
+                                                  &action->encap.ipv6.ipv6_dst,
+                                                  action->encap.tp_dst,
+                                                  action->encap.tos,
+                                                  action->encap.ttl,
+                                                  action->encap.data,
+                                                  action->encap.no_csum);
                     nl_msg_put_act_flags(request);
                     nl_msg_end_nested(request, act_offset);
                 }
-                VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_PEDIT end");
-            }
-            break;
-            case TC_ACT_ENCAP: {
-                act_offset = nl_msg_start_nested(request, act_index++);
-                nl_msg_put_act_tunnel_key_set(request, action->encap.id_present,
-                                              action->encap.id,
-                                              action->encap.ipv4.ipv4_src,
-                                              action->encap.ipv4.ipv4_dst,
-                                              &action->encap.ipv6.ipv6_src,
-                                              &action->encap.ipv6.ipv6_dst,
-                                              action->encap.tp_dst,
-                                              action->encap.tos,
-                                              action->encap.ttl,
-                                              action->encap.data,
-                                              action->encap.no_csum);
-                nl_msg_put_act_flags(request);
-                nl_msg_end_nested(request, act_offset);
-            }
-            break;
-            case TC_ACT_VLAN_POP: {
-                act_offset = nl_msg_start_nested(request, act_index++);
-                nl_msg_put_act_pop_vlan(request);
-                nl_msg_put_act_flags(request);
-                nl_msg_end_nested(request, act_offset);
-            }
-            break;
-            case TC_ACT_VLAN_PUSH: {
-                VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_VLAN_PUSH start");
-                act_offset = nl_msg_start_nested(request, act_index++);
-                nl_msg_put_act_push_vlan(request,
-                                         action->vlan.vlan_push_tpid,
-                                         action->vlan.vlan_push_id,
-                                         action->vlan.vlan_push_prio);
-                nl_msg_put_act_flags(request);
-                nl_msg_end_nested(request, act_offset);
-                VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_VLAN_PUSH end");
-            }
-            break;
-            case TC_ACT_MPLS_POP: {
-                act_offset = nl_msg_start_nested(request, act_index++);
-                nl_msg_put_act_pop_mpls(request, action->mpls.proto);
-                nl_msg_end_nested(request, act_offset);
-            }
-            break;
-            case TC_ACT_MPLS_PUSH: {
-                /*VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_MPLS_PUSH start");*/
-                act_offset = nl_msg_start_nested(request, act_index++);
-                nl_msg_put_act_push_mpls(request, action->mpls.proto,
-                                         action->mpls.label, action->mpls.tc,
-                                         action->mpls.ttl, action->mpls.bos);
-                nl_msg_end_nested(request, act_offset);
-                /*VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_MPLS_PUSH end");*/
-            }
-            break;
-            case TC_ACT_MPLS_SET: {
-                act_offset = nl_msg_start_nested(request, act_index++);
-                nl_msg_put_act_set_mpls(request, action->mpls.label,
-                                        action->mpls.tc, action->mpls.ttl,
-                                        action->mpls.bos);
-                nl_msg_end_nested(request, act_offset);
-            }
-            break;
-            case TC_ACT_OUTPUT: {
-                /*VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_OUTPUT start");*/
-                if (!released && flower->tunnel) {
+                    break;
+                case TC_ACT_VLAN_POP: {
                     act_offset = nl_msg_start_nested(request, act_index++);
-                    nl_msg_put_act_tunnel_key_release(request);
-                    nl_msg_end_nested(request, act_offset);
-                    released = true;
-                }
-
-                ingress = action->out.ingress;
-                ifindex = action->out.ifindex_out;
-                if (ifindex < 1) {
-                    VLOG_ERR_RL(&error_rl, "%s: invalid ifindex: %d, type: %d",
-                                __func__, ifindex, action->type);
-                    return EINVAL;
-                }
-
-                if (ingress) {
-                    /* If redirecting to ingress (internal port) ensure
-                     * pkt_type on skb is set to PACKET_HOST. */
-                    act_offset = nl_msg_start_nested(request, act_index++);
-                    nl_msg_put_act_skbedit_to_host(request);
+                    nl_msg_put_act_pop_vlan(request);
+                    nl_msg_put_act_flags(request);
                     nl_msg_end_nested(request, act_offset);
                 }
-
-                act_offset = nl_msg_start_nested(request, act_index++);
-                if (i == flower->action_count - 1) {
-                    if (ingress) {
-                        nl_msg_put_act_mirred(request, ifindex, TC_ACT_STOLEN,
-                                              TCA_INGRESS_REDIR);
-                    } else {
-                        nl_msg_put_act_mirred(request, ifindex, TC_ACT_STOLEN,
-                                              TCA_EGRESS_REDIR);
-                    }
-                } else {
-                    if (ingress) {
-                        nl_msg_put_act_mirred(request, ifindex, TC_ACT_PIPE,
-                                              TCA_INGRESS_MIRROR);
-                    } else {
-                        nl_msg_put_act_mirred(request, ifindex, TC_ACT_PIPE,
-                                              TCA_EGRESS_MIRROR);
-                    }
+                    break;
+                case TC_ACT_VLAN_PUSH: {
+                    VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_VLAN_PUSH start");
+                    act_offset = nl_msg_start_nested(request, act_index++);
+                    nl_msg_put_act_push_vlan(request,
+                                             action->vlan.vlan_push_tpid,
+                                             action->vlan.vlan_push_id,
+                                             action->vlan.vlan_push_prio);
+                    nl_msg_put_act_flags(request);
+                    nl_msg_end_nested(request, act_offset);
+                    VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_VLAN_PUSH end");
                 }
-                nl_msg_put_act_cookie(request, &flower->act_cookie);
-                nl_msg_put_act_flags(request);
-                nl_msg_end_nested(request, act_offset);
-                /*VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_OUTPUT end");*/
-            }
-            break;
-            case TC_ACT_GOTO: {
-                if (released) {
-                    /* We don't support tunnel release + output + goto
-                     * for now, as next chain by default will try and match
-                     * the tunnel metadata that was released/unset.
-                     *
-                     * This will happen with tunnel + mirror ports.
-                     */
-                    return -EOPNOTSUPP;
+                    break;
+                case TC_ACT_MPLS_POP: {
+                    act_offset = nl_msg_start_nested(request, act_index++);
+                    nl_msg_put_act_pop_mpls(request, action->mpls.proto);
+                    nl_msg_end_nested(request, act_offset);
                 }
+                    break;
+                case TC_ACT_MPLS_PUSH: {
+                    /*VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_MPLS_PUSH start");*/
+                    act_offset = nl_msg_start_nested(request, act_index++);
+                    nl_msg_put_act_push_mpls(request, action->mpls.proto,
+                                             action->mpls.label, action->mpls.tc,
+                                             action->mpls.ttl, action->mpls.bos);
+                    nl_msg_end_nested(request, act_offset);
+                    /*VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_MPLS_PUSH end");*/
+                }
+                    break;
+                case TC_ACT_MPLS_SET: {
+                    act_offset = nl_msg_start_nested(request, act_index++);
+                    nl_msg_put_act_set_mpls(request, action->mpls.label,
+                                            action->mpls.tc, action->mpls.ttl,
+                                            action->mpls.bos);
+                    nl_msg_end_nested(request, act_offset);
+                }
+                    break;
+                case TC_ACT_OUTPUT: {
+                    /*VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_OUTPUT start");*/
+                    if (!released && flower->tunnel) {
+                        act_offset = nl_msg_start_nested(request, act_index++);
+                        nl_msg_put_act_tunnel_key_release(request);
+                        nl_msg_end_nested(request, act_offset);
+                        released = true;
+                    }
 
-                act_offset = nl_msg_start_nested(request, act_index++);
-                nl_msg_put_act_gact(request, action->chain);
-                nl_msg_put_act_cookie(request, &flower->act_cookie);
-                nl_msg_end_nested(request, act_offset);
-            }
-            break;
-            case TC_ACT_CT: {
-                act_offset = nl_msg_start_nested(request, act_index++);
-                nl_msg_put_act_ct(request, action);
-                nl_msg_put_act_cookie(request, &flower->act_cookie);
-                nl_msg_end_nested(request, act_offset);
-            }
-            break;
+                    ingress = action->out.ingress;
+                    ifindex = action->out.ifindex_out;
+                    if (ifindex < 1) {
+                        VLOG_ERR_RL(&error_rl, "%s: invalid ifindex: %d, type: %d",
+                                    __func__, ifindex, action->type);
+                        return EINVAL;
+                    }
+
+                    if (ingress) {
+                        /* If redirecting to ingress (internal port) ensure
+                         * pkt_type on skb is set to PACKET_HOST. */
+                        act_offset = nl_msg_start_nested(request, act_index++);
+                        nl_msg_put_act_skbedit_to_host(request);
+                        nl_msg_end_nested(request, act_offset);
+                    }
+
+                    act_offset = nl_msg_start_nested(request, act_index++);
+                    if (i == flower->action_count - 1) {
+                        if (ingress) {
+                            nl_msg_put_act_mirred(request, ifindex, TC_ACT_STOLEN,
+                                                  TCA_INGRESS_REDIR);
+                        } else {
+                            nl_msg_put_act_mirred(request, ifindex, TC_ACT_STOLEN,
+                                                  TCA_EGRESS_REDIR);
+                        }
+                    } else {
+                        if (ingress) {
+                            nl_msg_put_act_mirred(request, ifindex, TC_ACT_PIPE,
+                                                  TCA_INGRESS_MIRROR);
+                        } else {
+                            nl_msg_put_act_mirred(request, ifindex, TC_ACT_PIPE,
+                                                  TCA_EGRESS_MIRROR);
+                        }
+                    }
+                    nl_msg_put_act_cookie(request, &flower->act_cookie);
+                    nl_msg_put_act_flags(request);
+                    nl_msg_end_nested(request, act_offset);
+                    /*VLOG_INFO("+++++++++++zq: nl_msg_put_flower_acts: TC_ACT_OUTPUT end");*/
+                }
+                    break;
+                case TC_ACT_GOTO: {
+                    if (released) {
+                        /* We don't support tunnel release + output + goto
+                         * for now, as next chain by default will try and match
+                         * the tunnel metadata that was released/unset.
+                         *
+                         * This will happen with tunnel + mirror ports.
+                         */
+                        return -EOPNOTSUPP;
+                    }
+
+                    act_offset = nl_msg_start_nested(request, act_index++);
+                    nl_msg_put_act_gact(request, action->chain);
+                    nl_msg_put_act_cookie(request, &flower->act_cookie);
+                    nl_msg_end_nested(request, act_offset);
+                }
+                    break;
+                case TC_ACT_CT: {
+                    act_offset = nl_msg_start_nested(request, act_index++);
+                    nl_msg_put_act_ct(request, action);
+                    nl_msg_put_act_cookie(request, &flower->act_cookie);
+                    nl_msg_end_nested(request, act_offset);
+                }
+                    break;
+                case TC_ACT_ADD_FIELD: {
+                    VLOG_INFO("+++++++++++cf: nl_msg_put_flower_acts: TC_ACT_ADD_FIELD start");
+                    act_offset = nl_msg_start_nested(request, act_index++);
+                    nl_msg_put_act_add_field(request, action->add_field.offset, action->add_field.len,
+                                             action->add_field.value, sizeof(action->add_field.value));
+                    nl_msg_end_nested(request, act_offset);
+                    VLOG_INFO("+++++++++++cf: nl_msg_put_flower_acts: TC_ACT_ADD_FIELD end");
+                }
+                    break;
             }
         }
     }
